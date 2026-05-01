@@ -181,18 +181,19 @@ class CinematicUnavailableError(Exception):
 def _cinematic_is_selectable(page) -> bool:
     """
     Check whether the Cinematic option exists and is interactive.
-
-    Looks for the element first, then confirms it is not disabled or
-    visually greyed out. NotebookLM marks unavailable styles with
-    aria-disabled, a disabled attribute, or an "unavailable" / "locked"
-    CSS class depending on the UI version.
+    Updated selectors match the current NotebookLM UI where Cinematic
+    appears as a card inside the Customize Video Overview panel.
     """
     cinematic_selectors = [
+        # Current UI: card with "Cinematic" as a heading inside it
+        'div:has(> *:has-text("Cinematic"))',
+        'div:has-text("Cinematic"):has-text("immersive")',
+        'div:has-text("Cinematic"):has-text("storytelling")',
+        # Fallback selectors for older UI variants
         'button:has-text("Cinematic")',
         'input[value="Cinematic"]',
         'label:has-text("Cinematic")',
         '[aria-label="Cinematic"]',
-        'div:has-text("Cinematic"):not(:has(div))',
     ]
 
     for sel in cinematic_selectors:
@@ -201,7 +202,6 @@ def _cinematic_is_selectable(page) -> bool:
             if el is None:
                 continue
 
-            # Element found — now check it is actually interactive
             is_disabled = (
                 el.get_attribute("disabled") is not None
                 or el.get_attribute("aria-disabled") == "true"
@@ -210,20 +210,17 @@ def _cinematic_is_selectable(page) -> bool:
                 print(f"  Cinematic element found but marked disabled: {sel}")
                 return False
 
-            # Check for greyed-out / locked CSS classes
             class_attr = (el.get_attribute("class") or "").lower()
             unavailable_indicators = ["disabled", "unavailable", "locked", "inactive", "grayed", "greyed"]
             if any(ind in class_attr for ind in unavailable_indicators):
-                print(f"  Cinematic element found but appears unavailable (class: {class_attr[:60]}): {sel}")
+                print(f"  Cinematic element found but appears unavailable: {sel}")
                 return False
 
-            # Element exists and shows no unavailability markers
             return True
 
         except Exception:
             continue
 
-    # No Cinematic element found at all
     print("  Cinematic option not found in the Video Overview panel.")
     return False
 
@@ -238,13 +235,16 @@ def configure_video(page, steering_prompt: str):
     """
     print("Opening Video Overview panel...")
     _try_click(page, [
+        # Current UI label
+        'button:has-text("Video Overview")',
+        'button:has-text("Video overview")',
+        # Fallbacks
         'button:has-text("Video")',
         '[aria-label="Video overview"]',
-        'button:has-text("Video overview")',
         '[data-testid="video-tab"]',
     ], timeout=15000)
 
-    page.wait_for_timeout(2000)
+    page.wait_for_timeout(3000)
 
     # Check Cinematic availability before attempting selection
     print("Checking Cinematic availability...")
@@ -253,46 +253,44 @@ def configure_video(page, steering_prompt: str):
             "Cinematic videos are not available at this time."
         )
 
-    # Select Cinematic style
+    # Select Cinematic style — current UI uses clickable cards
     print("Selecting Cinematic style...")
     _try_click(page, [
+        # Current UI: card containing "Cinematic" heading
+        'div:has(> *:has-text("Cinematic"))',
+        'div:has-text("Cinematic"):has-text("immersive")',
+        'div:has-text("Cinematic"):has-text("storytelling")',
+        # Fallbacks
         'button:has-text("Cinematic")',
         'input[value="Cinematic"]',
         'label:has-text("Cinematic")',
         '[aria-label="Cinematic"]',
-        'div:has-text("Cinematic"):not(:has(div))',
     ], timeout=8000)
 
     page.wait_for_timeout(1000)
 
-    # Enter visual style and reading level instruction
-    print("Entering visual style prompt...")
-    style_filled = _try_fill(page, [
-        'input[placeholder*="style"]',
-        'textarea[placeholder*="style"]',
-        'input[placeholder*="visual"]',
-        'input[placeholder*="customiz"]',
-        'textarea[placeholder*="customiz"]',
-        'input[placeholder*="scenes"]',
-    ], VISUAL_STYLE_PROMPT)
+    # Enter customization text — current UI shows one textarea labeled
+    # "How would you like the video to be customized?"
+    # We combine visual style prompt + steering prompt into this single field.
+    print("Entering customization prompt...")
+    combined_prompt = VISUAL_STYLE_PROMPT + "\n\n" + steering_prompt[:800]
 
-    if not style_filled:
-        print("WARNING: Could not locate visual style input. Proceeding without it.")
-
-    page.wait_for_timeout(500)
-
-    # Enter steering prompt in the customization / instructions panel
-    print("Entering steering prompt...")
-    steering_filled = _try_fill(page, [
+    custom_filled = _try_fill(page, [
+        # Current UI placeholder text
+        'textarea[placeholder*="customized"]',
+        'textarea[placeholder*="customize"]',
+        'textarea[placeholder*="Compare"]',   # placeholder example text
+        # Fallbacks
         'textarea[placeholder*="instruct"]',
         'textarea[placeholder*="steering"]',
         'textarea[placeholder*="prompt"]',
         'textarea[placeholder*="topic"]',
-        'textarea[aria-label*="instruct"]',
-    ], steering_prompt[:1000])
+        'input[placeholder*="style"]',
+        'textarea[placeholder*="style"]',
+    ], combined_prompt)
 
-    if not steering_filled:
-        print("WARNING: Could not locate steering prompt input. Proceeding without it.")
+    if not custom_filled:
+        print("WARNING: Could not locate customization input. Proceeding without it.")
 
     page.wait_for_timeout(500)
 
