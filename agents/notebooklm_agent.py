@@ -227,70 +227,87 @@ def _cinematic_is_selectable(page) -> bool:
 
 def configure_video(page, steering_prompt: str):
     """
-    Open Video Overview, verify Cinematic is selectable, select it,
-    enter the visual style prompt and steering prompt, then click Generate.
+    Open Video Overview, select Cinematic, enter the customization prompt,
+    then click Generate.
 
-    Raises CinematicUnavailableError if the Cinematic option is absent,
-    disabled, or greyed out so the caller can route a specific Slack alert.
+    Raises CinematicUnavailableError only if Cinematic cannot be clicked
+    after multiple attempts and a generous wait — not from a pre-check.
+    This avoids false negatives when the panel is still loading.
     """
     print("Opening Video Overview panel...")
     _try_click(page, [
-        # Current UI label
         'button:has-text("Video Overview")',
         'button:has-text("Video overview")',
-        # Fallbacks
         'button:has-text("Video")',
         '[aria-label="Video overview"]',
         '[data-testid="video-tab"]',
     ], timeout=15000)
 
-    page.wait_for_timeout(3000)
+    # Wait generously for the panel to fully render before doing anything
+    page.wait_for_timeout(5000)
 
-    # Check Cinematic availability before attempting selection
-    print("Checking Cinematic availability...")
-    if not _cinematic_is_selectable(page):
+    # Try to select Cinematic — attempt up to 3 times with waits between
+    print("Selecting Cinematic style...")
+    cinematic_clicked = False
+    for attempt in range(3):
+        cinematic_clicked = _try_click(page, [
+            # Current UI: card-based selector matching visible text
+            'div:has-text("Cinematic"):has-text("immersive")',
+            'div:has-text("Cinematic"):has-text("storytelling")',
+            'div:has-text("Cinematic"):has-text("rich")',
+            # Generic text match
+            'button:has-text("Cinematic")',
+            'label:has-text("Cinematic")',
+            '[aria-label="Cinematic"]',
+        ], timeout=5000)
+
+        if cinematic_clicked:
+            print(f"  Cinematic selected on attempt {attempt + 1}.")
+            break
+
+        print(f"  Attempt {attempt + 1} failed — waiting 3s and retrying...")
+        page.wait_for_timeout(3000)
+
+    if not cinematic_clicked:
         raise CinematicUnavailableError(
             "Cinematic videos are not available at this time."
         )
 
-    # Select Cinematic style — current UI uses clickable cards
-    print("Selecting Cinematic style...")
-    _try_click(page, [
-        # Current UI: card containing "Cinematic" heading
-        'div:has(> *:has-text("Cinematic"))',
-        'div:has-text("Cinematic"):has-text("immersive")',
-        'div:has-text("Cinematic"):has-text("storytelling")',
-        # Fallbacks
-        'button:has-text("Cinematic")',
-        'input[value="Cinematic"]',
-        'label:has-text("Cinematic")',
-        '[aria-label="Cinematic"]',
-    ], timeout=8000)
-
     page.wait_for_timeout(1000)
 
-    # Enter customization text — current UI shows one textarea labeled
-    # "How would you like the video to be customized?"
-    # We combine visual style prompt + steering prompt into this single field.
+    # Fill the single customization textarea.
+    # Current NotebookLM UI has one field: "How would you like the video to be customized?"
+    # We combine visual style + steering prompt into it.
     print("Entering customization prompt...")
     combined_prompt = VISUAL_STYLE_PROMPT + "\n\n" + steering_prompt[:800]
 
-    custom_filled = _try_fill(page, [
-        # Current UI placeholder text
+    # Try all known textarea selectors — use fill() not type() for speed
+    custom_filled = False
+    for sel in [
         'textarea[placeholder*="customized"]',
         'textarea[placeholder*="customize"]',
-        'textarea[placeholder*="Compare"]',   # placeholder example text
-        # Fallbacks
+        'textarea[placeholder*="step"]',
+        'textarea[placeholder*="Provide"]',
+        'textarea[placeholder*="Compare"]',
         'textarea[placeholder*="instruct"]',
-        'textarea[placeholder*="steering"]',
         'textarea[placeholder*="prompt"]',
         'textarea[placeholder*="topic"]',
-        'input[placeholder*="style"]',
         'textarea[placeholder*="style"]',
-    ], combined_prompt)
+        'textarea',
+    ]:
+        try:
+            el = page.query_selector(sel)
+            if el and el.is_visible():
+                el.click()
+                el.fill(combined_prompt)
+                custom_filled = True
+                print(f"  Customization filled via: {sel}")
+                break
+        except Exception:
+            continue
 
     if not custom_filled:
-        print("WARNING: Could not locate customization input. Proceeding without it.")
+        print("WARNING: Could not locate customization textarea. Proceeding without it.")
 
     page.wait_for_timeout(500)
 
