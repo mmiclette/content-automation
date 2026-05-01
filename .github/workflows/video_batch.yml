@@ -1,0 +1,87 @@
+name: Video Batch
+
+on:
+  workflow_dispatch:
+    inputs:
+      journey_id:
+        description: "Journey run ID (from journey_creation workflow)"
+        required: true
+        type: string
+      journey_topic:
+        description: "Human-readable journey topic name"
+        required: true
+        type: string
+      batch_num:
+        description: "Current batch number (1-indexed)"
+        required: true
+        type: string
+      topics_json:
+        description: "JSON array of video topic objects for this batch (includes sequence metadata)"
+        required: true
+        type: string
+
+jobs:
+  create-videos:
+    name: "[${{ matrix.video.sequence_position }}/${{ matrix.video.total_videos }}] ${{ matrix.video.topic }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+
+    strategy:
+      matrix:
+        video: ${{ fromJson(inputs.topics_json) }}
+      max-parallel: 2       # hard cap: 2 concurrent NotebookLM sessions
+      fail-fast: false      # one failure must not cancel its sibling
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright Chromium
+        run: playwright install chromium --with-deps
+
+      - name: Generate evidence-based source document
+        # Passes full sequence metadata so the research agent knows:
+        #   - where this video sits in the program arc
+        #   - what the previous video already covered (do not repeat)
+        #   - what the next video will cover (do not front-run)
+        run: >
+          python agents/research_agent.py
+          "${{ matrix.video.topic }}"
+          "${{ matrix.video.copy }}"
+          "${{ matrix.video.sequence_position }}"
+          "${{ matrix.video.total_videos }}"
+          '${{ toJson(matrix.video.adjacent_context) }}'
+          "${{ inputs.journey_topic }}"
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: Create NotebookLM notebook and poll for completion
+        run: >
+          python agents/notebooklm_agent.py
+          "${{ matrix.video.topic }}"
+          "${{ inputs.journey_id }}"
+          "${{ inputs.batch_num }}"
+        env:
+          ANTHROPIC_API_KEY:  ${{ secrets.ANTHROPIC_API_KEY }}
+          NOTEBOOKLM_SESSION: ${{ secrets.NOTEBOOKLM_SESSION }}
+          NOTEBOOKLM_EMAIL:   ${{ secrets.NOTEBOOKLM_EMAIL }}
+          JOURNEY_ID:         ${{ inputs.journey_id }}
+          BATCH_NUM:          ${{ inputs.batch_num }}
+
+      - name: Send Slack notification (success or failure)
+        if: always()
+        run: python agents/slack_notifier.py video_ready
+        env:
+          SLACK_BOT_TOKEN:  ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID: ${{ secrets.SLACK_CHANNEL_ID }}
+          JOURNEY_ID:       ${{ inputs.journey_id }}
+          BATCH_NUM:        ${{ inputs.batch_num }}

@@ -1,0 +1,48 @@
+name: Journey Creation
+
+on:
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: "Digital health program topic"
+        required: true
+        type: string
+      context:
+        description: "Additional context for more specific journey generation (optional)"
+        required: false
+        default: ""
+        type: string
+
+jobs:
+  build-journey:
+    name: "Build journey: ${{ inputs.topic }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Generate journey content and build spreadsheet
+        run: python agents/journey_builder.py "${{ inputs.topic }}" "${{ inputs.context }}"
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: Post spreadsheet to Slack and register batch queue with relay
+        run: python agents/slack_notifier.py post_journey
+        env:
+          SLACK_BOT_TOKEN:   ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID:  ${{ secrets.SLACK_CHANNEL_ID }}
+          JOURNEY_TOPIC:     ${{ inputs.topic }}
+          RELAY_URL:         ${{ secrets.RELAY_URL }}
+          RELAY_SECRET:      ${{ secrets.RELAY_SECRET }}
+          GH_RUN_ID:         ${{ github.run_id }}

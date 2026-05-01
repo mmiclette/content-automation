@@ -1,0 +1,69 @@
+name: Video Creation
+
+on:
+  workflow_dispatch:
+    inputs:
+      topic:
+        description: "Video topic (required)"
+        required: true
+        type: string
+      context:
+        description: "Additional context for the research agent (optional)"
+        required: false
+        default: ""
+        type: string
+      journey_id:
+        description: "Journey run ID if this video is part of a journey batch"
+        required: false
+        default: ""
+        type: string
+      batch_num:
+        description: "Batch number if part of a journey"
+        required: false
+        default: ""
+        type: string
+
+jobs:
+  create-video:
+    name: "Create video: ${{ inputs.topic }}"
+    runs-on: ubuntu-latest
+    timeout-minutes: 360        # 6-hour ceiling — well above the 2-hour poll max
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright Chromium
+        run: playwright install chromium --with-deps
+
+      - name: Generate evidence-based source document
+        run: python agents/research_agent.py "${{ inputs.topic }}" "${{ inputs.context }}"
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+
+      - name: Create NotebookLM notebook and poll for completion
+        run: python agents/notebooklm_agent.py "${{ inputs.topic }}" "${{ inputs.journey_id }}" "${{ inputs.batch_num }}"
+        env:
+          ANTHROPIC_API_KEY:   ${{ secrets.ANTHROPIC_API_KEY }}
+          NOTEBOOKLM_SESSION:  ${{ secrets.NOTEBOOKLM_SESSION }}
+          NOTEBOOKLM_EMAIL:    ${{ secrets.NOTEBOOKLM_EMAIL }}
+          JOURNEY_ID:          ${{ inputs.journey_id }}
+          BATCH_NUM:           ${{ inputs.batch_num }}
+
+      - name: Send Slack notification
+        if: always()            # notify even on failure so nothing disappears silently
+        run: python agents/slack_notifier.py video_ready
+        env:
+          SLACK_BOT_TOKEN:   ${{ secrets.SLACK_BOT_TOKEN }}
+          SLACK_CHANNEL_ID:  ${{ secrets.SLACK_CHANNEL_ID }}
+          JOURNEY_ID:        ${{ inputs.journey_id }}
+          BATCH_NUM:         ${{ inputs.batch_num }}
