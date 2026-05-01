@@ -236,11 +236,17 @@ def configure_video(page, steering_prompt: str):
     """
     print("Opening Video Overview panel...")
     _try_click(page, [
+        # Current UI: Angular Material span inside a clickable card
+        'span.create-label-container:has-text("Video Overview")',
+        '[class*="create-label-container"]:has-text("Video Overview")',
+        # Walk up to the mat-card or button parent
+        'mat-card:has-text("Video Overview")',
         'button:has-text("Video Overview")',
-        'button:has-text("Video overview")',
+        '[role="button"]:has-text("Video Overview")',
+        # Broader fallbacks
+        ':has-text("Video Overview")',
         'button:has-text("Video")',
         '[aria-label="Video overview"]',
-        '[data-testid="video-tab"]',
     ], timeout=15000)
 
     # Wait generously for the panel to fully render before doing anything
@@ -251,11 +257,13 @@ def configure_video(page, steering_prompt: str):
     cinematic_clicked = False
     for attempt in range(3):
         cinematic_clicked = _try_click(page, [
-            # Current UI: card-based selector matching visible text
-            'div:has-text("Cinematic"):has-text("immersive")',
-            'div:has-text("Cinematic"):has-text("storytelling")',
-            'div:has-text("Cinematic"):has-text("rich")',
-            # Generic text match
+            # Current UI: Angular tile — click the description paragraph's parent
+            'p.tile-description:has-text("immersive")',
+            '[class*="tile-description"]:has-text("immersive")',
+            # Walk up to the tile container
+            '[class*="tile"]:has-text("Cinematic")',
+            'mat-card:has-text("Cinematic")',
+            # Fallbacks
             'button:has-text("Cinematic")',
             'label:has-text("Cinematic")',
             '[aria-label="Cinematic"]',
@@ -275,24 +283,23 @@ def configure_video(page, steering_prompt: str):
 
     page.wait_for_timeout(1000)
 
-    # Fill the single customization textarea.
-    # Current NotebookLM UI has one field: "How would you like the video to be customized?"
-    # We combine visual style + steering prompt into it.
+    # Fill the customization textarea.
+    # Exact selector from inspecting the live NotebookLM UI:
+    # aria-label="How would you like the video to be customized?"
     print("Entering customization prompt...")
     combined_prompt = VISUAL_STYLE_PROMPT + "\n\n" + steering_prompt[:800]
 
-    # Try all known textarea selectors — use fill() not type() for speed
     custom_filled = False
     for sel in [
-        'textarea[placeholder*="customized"]',
-        'textarea[placeholder*="customize"]',
-        'textarea[placeholder*="step"]',
-        'textarea[placeholder*="Provide"]',
-        'textarea[placeholder*="Compare"]',
-        'textarea[placeholder*="instruct"]',
-        'textarea[placeholder*="prompt"]',
-        'textarea[placeholder*="topic"]',
-        'textarea[placeholder*="style"]',
+        # Exact match from live DOM inspection
+        'textarea[aria-label="How would you like the video to be customized?"]',
+        'textarea[aria-label*="customized"]',
+        'textarea[aria-label*="customize"]',
+        # Angular Material class fallbacks
+        'textarea.mat-mdc-input-element',
+        'textarea.mdc-text-field__input',
+        # Last resort
+        'textarea[maxlength="5000"]',
         'textarea',
     ]:
         try:
