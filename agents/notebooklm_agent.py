@@ -24,9 +24,10 @@ import anthropic
 from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
 NOTEBOOKLM_BASE = "https://notebooklm.google.com"
-POLL_INTERVAL   = 60     # seconds between completion checks
-MAX_WAIT        = 7200   # 2-hour ceiling
-VISION_EVERY    = 5      # run vision check every N polls
+POLL_INTERVAL   = 300    # 5 minutes between completion checks
+INITIAL_WAIT    = 1200   # wait 20 minutes before first check (video won't be ready before then)
+MAX_WAIT        = 3600   # 60-minute ceiling
+VISION_EVERY    = 3      # run vision check every N polls (every 15 minutes)
 
 VISUAL_STYLE_PROMPT = "Use colorful papercraft style and modern scenes. The reading level of the words used in the script should be no higher than 6th grade for a layman to clearly understand."
 
@@ -335,23 +336,54 @@ def configure_video(page, steering_prompt: str):
 # ─── Completion polling ───────────────────────────────────────────────────────
 
 def check_dom_complete(page) -> bool:
-    """Fast check: look for DOM elements that appear when a video is ready."""
+    """
+    Fast check: look for DOM elements that appear when a video is ready.
+    Checks both visible elements and page text content for completion signals.
+    """
+    # Direct element selectors — based on live DOM inspection of NotebookLM
     selectors = [
+        # Play button present in the video list when generation is complete
+        'mat-icon:has-text("play_arrow")',
+        '.mat-mdc-button-touch-target',
+        # Download/view controls
         '[aria-label="Download video"]',
+        '[aria-label*="Download"]',
         'button:has-text("Download")',
-        'video[src]',
-        '[data-testid="video-ready"]',
-        'button:has-text("View video")',
-        '.video-player video',
         'button:has-text("Download video")',
+        'button:has-text("View video")',
+        # Video element
+        'video[src]',
+        '.video-player video',
+        '[data-testid="video-ready"]',
+        # Angular Material variants
+        'mat-icon:has-text("download")',
     ]
     for sel in selectors:
         try:
             el = page.query_selector(sel)
             if el and el.is_visible():
+                print(f"  Completion detected via selector: {sel}")
                 return True
         except Exception:
             pass
+
+    # Also check page text for completion language
+    try:
+        body_text = page.inner_text("body").lower()
+        completion_phrases = [
+            "video is ready",
+            "your video is ready",
+            "video complete",
+            "download video",
+            "view your video",
+        ]
+        for phrase in completion_phrases:
+            if phrase in body_text:
+                print(f"  Completion detected via page text: '{phrase}'")
+                return True
+    except Exception:
+        pass
+
     return False
 
 
@@ -374,8 +406,12 @@ def check_vision_complete(page, client: anthropic.Anthropic) -> bool:
                         "text": (
                             "This is a screenshot of NotebookLM. "
                             "Has the video finished generating? "
-                            "Look for: a playable video player, a Download button, "
-                            "a video thumbnail, or text saying the video is ready. "
+                            "Look for ANY of these signals: "
+                            "a playable video player or thumbnail, "
+                            "a Download or Download video button, "
+                            "a View video button, "
+                            "text saying the video is ready or complete, "
+                            "a progress bar that has reached 100 percent. "
                             "Reply with exactly one word: READY or WAITING."
                         )
                     }
@@ -390,14 +426,31 @@ def check_vision_complete(page, client: anthropic.Anthropic) -> bool:
 
 def poll_until_complete(page, client: anthropic.Anthropic) -> bool:
     """
-    Poll the NotebookLM page until the video is ready or the 2-hour ceiling is hit.
-    Refreshes the page every 10 minutes to get the latest state.
+    Tiered polling strategy to minimise wasted runner time:
+      - Wait 20 minutes before the first check (video is never ready before this)
+      - Check every 5 minutes after that
+      - Run a Claude vision check every 3 polls (every 15 minutes)
+      - Refresh the page before every check to get the latest state
+      - 60-minute hard ceiling
     """
-    elapsed = 0
+    # Initial wait — no point checking before 20 minutes
+    print(f"  Waiting {INITIAL_WAIT // 60} minutes before first check...")
+    time.sleep(INITIAL_WAIT)
+
+    elapsed = INITIAL_WAIT
     poll_count = 0
 
     while elapsed < MAX_WAIT:
         mins = elapsed // 60
+
+        # Refresh the page before each check so we see the latest state
+        print(f"  [{mins}m] Refreshing page...")
+        try:
+            page.reload(wait_until="networkidle", timeout=30000)
+            page.wait_for_timeout(2000)
+        except Exception as e:
+            print(f"  Refresh failed (non-fatal): {e}")
+
         print(f"  [{mins}m] Checking for video completion...")
 
         if check_dom_complete(page):
@@ -406,20 +459,13 @@ def poll_until_complete(page, client: anthropic.Anthropic) -> bool:
 
         poll_count += 1
         if poll_count % VISION_EVERY == 0:
-            print(f"  Running vision check...")
+            print(f"  [{mins}m] Running vision check...")
             if check_vision_complete(page, client):
                 print(f"  Completion detected via vision at {mins}m.")
                 return True
 
-        # Soft page refresh every 10 minutes
-        if elapsed > 0 and elapsed % 600 == 0:
-            print("  Refreshing page to get latest state...")
-            try:
-                page.reload(wait_until="networkidle", timeout=30000)
-                page.wait_for_timeout(3000)
-            except Exception as e:
-                print(f"  Refresh failed (non-fatal): {e}")
-
+        remaining = (MAX_WAIT - elapsed) // 60
+        print(f"  Not ready yet. Next check in {POLL_INTERVAL // 60} min. ({remaining}m remaining before timeout)")
         time.sleep(POLL_INTERVAL)
         elapsed += POLL_INTERVAL
 
