@@ -188,36 +188,61 @@ def notify_video_error(topic: str, error: str, notebook_url: str = ""):
 # ─── Journey spreadsheet upload ───────────────────────────────────────────────
 
 def post_spreadsheet(filepath: str, journey_topic: str, total_videos: int):
-    """Upload the journey xlsx to Slack and post an intro message."""
-    filename = os.path.basename(filepath)
+    """
+    Upload the journey xlsx to Slack using the current (non-deprecated) API.
+    Slack deprecated files.upload in March 2024. This uses the two-step
+    files.getUploadURLExternal + files.completeUploadExternal flow.
+    """
+    filename  = os.path.basename(filepath)
+    token     = os.environ["SLACK_BOT_TOKEN"]
+    channel   = os.environ["SLACK_CHANNEL_ID"]
+    file_size = os.path.getsize(filepath)
 
+    initial_comment = (
+        f":clipboard: *Journey template generated for {journey_topic}*\n"
+        f"The spreadsheet contains {total_videos} video activities. "
+        f"Review the template before video production begins. "
+        f"The first two videos will start generating automatically."
+    )
+
+    # Step 1: Get an upload URL from Slack
+    url_resp = requests.post(
+        f"{SLACK_API}/files.getUploadURLExternal",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json={"filename": filename, "length": file_size},
+        timeout=15
+    )
+    url_resp.raise_for_status()
+    url_data = url_resp.json()
+    if not url_data.get("ok"):
+        raise RuntimeError(f"Could not get upload URL: {url_data.get('error')}")
+
+    upload_url = url_data["upload_url"]
+    file_id    = url_data["file_id"]
+
+    # Step 2: Upload the file content to the provided URL
     with open(filepath, "rb") as f:
-        resp = requests.post(
-            f"{SLACK_API}/files.upload",
-            headers={"Authorization": f"Bearer {os.environ['SLACK_BOT_TOKEN']}"},
-            data={
-                "channels": os.environ["SLACK_CHANNEL_ID"],
-                "filename": filename,
-                "title":    f"{journey_topic} — Journey Template",
-                "initial_comment": (
-                    f":clipboard: *Journey template generated for {journey_topic}*\n"
-                    f"The spreadsheet contains {total_videos} video activities. "
-                    f"Review the template before video generation begins. "
-                    f"Video production will start automatically — "
-                    f"you will receive a notification when the first two videos are ready."
-                )
-            },
-            files={"file": f},
-            timeout=30
-        )
+        upload_resp = requests.post(upload_url, files={"file": f}, timeout=60)
+    upload_resp.raise_for_status()
 
-    resp.raise_for_status()
-    data = resp.json()
-    if not data.get("ok"):
-        raise RuntimeError(f"Slack file upload failed: {data.get('error')}")
+    # Step 3: Complete the upload and share to the channel
+    complete_resp = requests.post(
+        f"{SLACK_API}/files.completeUploadExternal",
+        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        json={
+            "files":           [{"id": file_id, "title": f"{journey_topic} — Journey Template"}],
+            "channel_id":      channel,
+            "initial_comment": initial_comment
+        },
+        timeout=15
+    )
+    complete_resp.raise_for_status()
+    complete_data = complete_resp.json()
+    if not complete_data.get("ok"):
+        raise RuntimeError(f"Slack file upload failed: {complete_data.get('error')}")
 
     print(f"Slack: spreadsheet uploaded for '{journey_topic}'")
-    return data
+    return complete_data
 
 
 # ─── Register journey with relay and start batch 1 ───────────────────────────

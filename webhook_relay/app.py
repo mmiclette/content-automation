@@ -150,20 +150,29 @@ def handle_video():
     if not text:
         return jsonify({"response_type": "ephemeral", "text": "Usage: `/video [topic]: [optional context]`"})
 
-    # Support "topic: context" format from the wireframe spec
     if ":" in text:
         topic, context = [p.strip() for p in text.split(":", 1)]
     else:
         topic, context = text, ""
 
-    try:
-        dispatch("video_creation.yml", {"topic": topic, "context": context})
-        return jsonify({
-            "response_type": "in_channel",
-            "text": f":clapper: Video workflow started for *{topic}*. I'll post here when the video is ready for review."
-        })
-    except Exception as e:
-        return jsonify({"response_type": "ephemeral", "text": f":x: Could not start workflow: {e}"})
+    # Dispatch in background so Slack gets a response within 3 seconds
+    def _dispatch():
+        try:
+            dispatch("video_creation.yml", {"topic": topic, "context": context})
+        except Exception as e:
+            slack_post(
+                [{"type": "section", "text": {"type": "mrkdwn",
+                  "text": ":x: *Video workflow failed to start*\n*Topic:* " + topic + "\n*Error:* " + str(e)}}],
+                "Video workflow failed to start: " + topic
+            )
+
+    import threading
+    threading.Thread(target=_dispatch, daemon=True).start()
+
+    return jsonify({
+        "response_type": "in_channel",
+        "text": f":clapper: Video workflow started for *{topic}*. I'll post here when the video is ready for review."
+    })
 
 
 @app.post("/slack/journey")
@@ -175,21 +184,30 @@ def handle_journey():
     if not text:
         return jsonify({"response_type": "ephemeral", "text": "Usage: `/journey [topic]: [optional context]`"})
 
-    # Support "topic: context" format — identical to /video parsing
     if ":" in text:
         topic, context = [p.strip() for p in text.split(":", 1)]
     else:
         topic, context = text, ""
 
-    try:
-        dispatch("journey_creation.yml", {"topic": topic, "context": context})
-        context_note = f" — context: _{context}_" if context else ""
-        return jsonify({
-            "response_type": "in_channel",
-            "text": f":scroll: Journey workflow started for *{topic}*{context_note}. I'll post the spreadsheet here once it's generated."
-        })
-    except Exception as e:
-        return jsonify({"response_type": "ephemeral", "text": f":x: Could not start workflow: {e}"})
+    context_note = f" — context: _{context}_" if context else ""
+
+    def _dispatch_journey():
+        try:
+            dispatch("journey_creation.yml", {"topic": topic, "context": context})
+        except Exception as e:
+            slack_post(
+                [{"type": "section", "text": {"type": "mrkdwn",
+                  "text": ":x: *Journey workflow failed to start*\n*Topic:* " + topic + "\n*Error:* " + str(e)}}],
+                "Journey workflow failed to start: " + topic
+            )
+
+    import threading
+    threading.Thread(target=_dispatch_journey, daemon=True).start()
+
+    return jsonify({
+        "response_type": "in_channel",
+        "text": f":scroll: Journey workflow started for *{topic}*{context_note}. I'll post the spreadsheet here once it's generated."
+    })
 
 
 @app.post("/slack/rerun")
@@ -201,21 +219,30 @@ def handle_rerun():
     if not text:
         return jsonify({"response_type": "ephemeral", "text": "Usage: `/rerun [topic]: [optional context]`"})
 
-    # Same colon-parsing as /video and /journey
     if ":" in text:
         topic, context = [p.strip() for p in text.split(":", 1)]
     else:
         topic, context = text, ""
 
-    try:
-        dispatch("video_creation.yml", {"topic": topic, "context": context})
-        context_note = f" — context: _{context}_" if context else ""
-        return jsonify({
-            "response_type": "in_channel",
-            "text": f":repeat: Rerunning video for *{topic}*{context_note}. I'll post here when the new version is ready."
-        })
-    except Exception as e:
-        return jsonify({"response_type": "ephemeral", "text": f":x: Could not start rerun: {e}"})
+    context_note = f" — context: _{context}_" if context else ""
+
+    def _dispatch_rerun():
+        try:
+            dispatch("video_creation.yml", {"topic": topic, "context": context})
+        except Exception as e:
+            slack_post(
+                [{"type": "section", "text": {"type": "mrkdwn",
+                  "text": ":x: *Rerun failed to start*\n*Topic:* " + topic + "\n*Error:* " + str(e)}}],
+                "Rerun failed to start: " + topic
+            )
+
+    import threading
+    threading.Thread(target=_dispatch_rerun, daemon=True).start()
+
+    return jsonify({
+        "response_type": "in_channel",
+        "text": f":repeat: Rerunning video for *{topic}*{context_note}. I'll post here when the new version is ready."
+    })
 
 
 # ─── Journey registration (called by journey_creation.yml) ───────────────────
