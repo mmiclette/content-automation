@@ -138,7 +138,7 @@ def create_notebook(page, source_document: str, topic: str) -> str:
 
     page.wait_for_timeout(1000)
 
-    # Fill in the source text
+    # Fill in the source text directly — no clipboard needed
     filled = _try_fill(page, [
         'textarea[placeholder*="Paste"]',
         'textarea[placeholder*="text"]',
@@ -147,10 +147,21 @@ def create_notebook(page, source_document: str, topic: str) -> str:
     ], source_document[:50000])
 
     if not filled:
-        # Clipboard fallback
-        page.evaluate(f"navigator.clipboard.writeText({json.dumps(source_document[:50000])})")
-        page.keyboard.press("Control+a")
-        page.keyboard.press("Control+v")
+        # DOM fallback — set value directly via JavaScript without clipboard
+        try:
+            page.evaluate("""(text) => {
+                const el = document.querySelector('textarea') ||
+                           document.querySelector('div[contenteditable]');
+                if (el) {
+                    el.value = text;
+                    el.dispatchEvent(new Event('input', { bubbles: true }));
+                    el.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }""", source_document[:50000])
+            filled = True
+            print("  Source text filled via DOM fallback.")
+        except Exception as e:
+            print(f"  DOM fallback failed: {e}")
 
     page.wait_for_timeout(500)
 
