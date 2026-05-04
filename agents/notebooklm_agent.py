@@ -34,6 +34,15 @@ VISUAL_STYLE_PROMPT = "Use colorful papercraft style and modern scenes. The read
 
 # ─── Session management ───────────────────────────────────────────────────────
 
+class SessionExpiredError(Exception):
+    """
+    Raised when the Google session has expired and NotebookLM
+    redirects to the login page instead of loading the notebook.
+    Routes a specific Slack alert with clear renewal instructions.
+    """
+    pass
+
+
 def restore_session(playwright_context, page):
     """Load saved Google cookies and localStorage from the NOTEBOOKLM_SESSION secret."""
     raw = os.environ.get("NOTEBOOKLM_SESSION", "").strip()
@@ -61,6 +70,41 @@ def restore_session(playwright_context, page):
                     "([k, v]) => localStorage.setItem(k, v)",
                     [item["name"], item["value"]]
                 )
+
+
+def check_session_valid(page) -> bool:
+    """
+    Navigate to NotebookLM and confirm we land on the app, not a login page.
+    Returns False if Google redirected to accounts.google.com (session expired).
+    """
+    print("Verifying Google session...")
+    page.goto(NOTEBOOKLM_BASE, wait_until="networkidle", timeout=30000)
+    page.wait_for_timeout(2000)
+
+    current_url = page.url
+    print(f"  Landed on: {current_url}")
+
+    # Session expired if redirected to Google login
+    if "accounts.google.com" in current_url or "signin" in current_url:
+        return False
+
+    # Also check for login-related elements on the page
+    login_indicators = [
+        'input[type="email"]',
+        'input[name="identifier"]',
+        'button:has-text("Sign in")',
+        '[data-action="sign in"]',
+    ]
+    for sel in login_indicators:
+        try:
+            el = page.query_selector(sel)
+            if el and el.is_visible():
+                print(f"  Login element detected: {sel}")
+                return False
+        except Exception:
+            pass
+
+    return True
 
 
 # ─── Notebook creation ────────────────────────────────────────────────────────
@@ -526,6 +570,13 @@ def run(topic: str, journey_id: str = "", batch_num: str = "") -> dict:
             print("Restoring Google session...")
             restore_session(ctx, page)
 
+            # Verify session is still valid before doing anything else
+            if not check_session_valid(page):
+                raise SessionExpiredError(
+                    "Google session has expired. "
+                    "Run scripts/export_session.py and update NOTEBOOKLM_SESSION in GitHub Secrets."
+                )
+
             notebook_url = create_notebook(page, source_document, topic)
             configure_video(page, steering_prompt)
 
@@ -552,6 +603,19 @@ def run(topic: str, journey_id: str = "", batch_num: str = "") -> dict:
                     "batch_num": batch_num,
                     "error": "Video generation timed out after 2 hours."
                 }
+
+        except SessionExpiredError as e:
+            print(f"Session expired: {e}")
+            result = {
+                "success":    False,
+                "error_code": "session_expired",
+                "topic":      topic,
+                "notebook_url": "",
+                "video_url":  "",
+                "journey_id": journey_id,
+                "batch_num":  batch_num,
+                "error":      str(e)
+            }
 
         except CinematicUnavailableError as e:
             # Cinematic was absent or disabled in the Video Overview panel.

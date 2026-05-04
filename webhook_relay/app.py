@@ -245,6 +245,44 @@ def handle_rerun():
     })
 
 
+@app.post("/slack/refresh-session")
+def handle_refresh_session():
+    if not verify_slack(request):
+        return jsonify({"error": "Invalid signature"}), 401
+
+    # Post the exact commands to Slack so the user never has to remember them
+    slack_post([
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": ":key:  How to refresh the NotebookLM session"}
+        },
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    "*Step 1 — Run this in Terminal:*\n"
+                    "```cd ~/content-automation && python3 scripts/export_session.py```\n\n"
+                    "A browser window will open. Log in with your Google email and password. "
+                    "Once NotebookLM loads, press Enter in Terminal.\n\n"
+                    "*Step 2 — Update GitHub Secret:*\n"
+                    "Open `notebooklm_session.txt` in TextEdit, copy all the text, then go to:\n"
+                    "```https://github.com/mmiclette/content-automation/settings/secrets/actions```\n"
+                    "Update `NOTEBOOKLM_SESSION` with the copied value.\n\n"
+                    "*Step 3 — Delete the local file:*\n"
+                    "```rm ~/content-automation/notebooklm_session.txt```\n\n"
+                    "Then rerun your video with `/rerun [topic]`"
+                )
+            }
+        }
+    ], "How to refresh the NotebookLM session")
+
+    return jsonify({
+        "response_type": "ephemeral",
+        "text": "Instructions posted to #content-automation."
+    })
+
+
 # ─── Journey registration (called by journey_creation.yml) ───────────────────
 
 @app.post("/journey/register")

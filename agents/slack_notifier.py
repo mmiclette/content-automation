@@ -113,6 +113,54 @@ def notify_video_ready(topic: str, notebook_url: str, journey_id: str = "", batc
     print(f"Slack: video ready notification sent for '{topic}'")
 
 
+def notify_session_expired(topic: str, journey_id: str = "", batch_num: str = ""):
+    """
+    Posts a clear Slack message when the Google session has expired,
+    with the exact terminal commands needed to fix it.
+    """
+    context_line = ("\n*Journey batch:* " + batch_num) if journey_id else ""
+
+    blocks = [
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": ":key:  Google session expired — action required"}
+        },
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    f"*Topic:* {topic}{context_line}\n"
+                    "The NotebookLM session has expired. "
+                    "Run these two commands in Terminal to fix it:"
+                )
+            }
+        },
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    "*Step 1 — Re-export the session:*\n"
+                    "```cd ~/content-automation && python3 scripts/export_session.py```\n\n"
+                    "*Step 2 — Copy the output and update the GitHub Secret:*\n"
+                    "```https://github.com/mmiclette/content-automation/settings/secrets/actions```\n"
+                    "Update `NOTEBOOKLM_SESSION` with the new value, then delete the local file:\n"
+                    "```rm ~/content-automation/notebooklm_session.txt```\n\n"
+                    "Then rerun the video using `/rerun " + topic + "`"
+                )
+            }
+        }
+    ]
+
+    _post("chat.postMessage", {
+        "channel": os.environ["SLACK_CHANNEL_ID"],
+        "blocks":  blocks,
+        "text":    "Google session expired — run scripts/export_session.py to fix it."
+    })
+    print("Slack: session expired notification sent")
+
+
 def notify_cinematic_unavailable(topic: str, notebook_url: str = "", journey_id: str = "", batch_num: str = ""):
     """
     Post the specific notification when Cinematic video style is not
@@ -311,6 +359,8 @@ if __name__ == "__main__":
 
         if result.get("success"):
             notify_video_ready(topic, notebook_url, journey_id, batch_num, context)
+        elif result.get("error_code") == "session_expired":
+            notify_session_expired(topic, journey_id, batch_num)
         elif result.get("error_code") == "cinematic_unavailable":
             notify_cinematic_unavailable(topic, notebook_url, journey_id, batch_num)
         else:
