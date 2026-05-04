@@ -1,9 +1,7 @@
 name: Keep Relay Alive
 
 on:
-  schedule:
-    - cron: "0 13,14,15,16,17,18,19,20,21,22 * * 1-5"  # every hour 9am-6pm ET, weekdays only
-  workflow_dispatch:
+  workflow_dispatch:   # manual trigger only — UptimeRobot handles automatic pinging
 
 jobs:
   ping:
@@ -14,3 +12,8 @@ jobs:
         run: |
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" ${{ secrets.RELAY_URL }}/health)
           echo "Relay responded with HTTP $STATUS"
+          if [ "$STATUS" != "200" ]; then
+            echo "WARNING: Relay returned $STATUS"
+            exit 1
+          fi
+          echo "Relay is live and healthy."
