@@ -102,9 +102,9 @@ Second, state the audience and emotional tone.
 
 Third, name the narrative arc.
 
-Fourth, describe the visual environment thematically. Use scene-setting language that implies warmth, safety, and normalcy. Describe scenes by the human experience they depict rather than by clinical or medical detail.
+Fourth, describe the visual environment thematically. Use colorful papercraft style and modern scenes as the foundation. Describe scenes by the human experience they depict — people in motion, engaging with daily life, connecting with others — rather than clinical or medical detail. Emphasize vibrancy, texture, and energy while keeping the tone warm and safe.
 
-Include this visual style baseline in every Steering Prompt: "Clean, modern, warm illustration style. Soft natural lighting. Diverse individuals in everyday settings including homes, parks, and welcoming clinical spaces. Calm color palette with muted greens, soft blues, and warm neutrals. No graphic or distressing imagery. Faces show calm, thoughtful, or gently hopeful expressions."
+Include this visual style baseline in every Steering Prompt: "Colorful papercraft style with modern scenes. Bold, vibrant colors and rich textures that feel handcrafted and tactile. Diverse individuals in everyday settings including homes, parks, and welcoming clinical spaces. Dynamic, energetic visuals that feel warm and engaging. No graphic or distressing imagery. Faces show calm, thoughtful, or gently hopeful expressions."
 
 For behavioral health topics, add: "Show only calm, safe, and hopeful imagery. Avoid any visuals depicting distress, crisis, physical pain, isolation, or medical emergency."
 
